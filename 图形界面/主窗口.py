@@ -15,6 +15,7 @@ from 配置 import 配置
 from .标签页 import 软件标签页
 from .进程标签页 import 进程标签页
 from .垃圾清理标签页 import 垃圾清理标签页
+from .软件分析标签页 import 软件分析标签页
 from .工作线程 import 工作线程, 任务类型
 
 
@@ -113,6 +114,10 @@ class 主窗口(QMainWindow):
         # 垃圾清理标签页
         self.垃圾清理标签页 = 垃圾清理标签页()
         self.标签页.addTab(self.垃圾清理标签页, "🧹 垃圾清理")
+
+        # 软件分析标签页
+        self.软件分析标签页 = 软件分析标签页()
+        self.标签页.addTab(self.软件分析标签页, "📊 软件分析")
     
     def showEvent(self, 事件):
         """窗口显示事件"""
@@ -366,12 +371,14 @@ class 主窗口(QMainWindow):
         QMessageBox.information(
             self,
             "关于",
-            "Linux 系统管理工具 v2.0\n\n"
+            "Linux 系统管理工具 v2.1\n\n"
             "一个基于 PySide6 的图形化 Linux 系统管理工具\n\n"
             "功能:\n"
             "• 软件包管理 (apt, yum, dnf, pacman, zypper)\n"
             "• 进程管理 (查看、终止、调整优先级)\n"
-            "• 系统资源监控 (CPU、内存、负载)"
+            "• 系统资源监控 (CPU、内存、负载)\n"
+            "• 垃圾清理 (缓存、临时文件、回收站)\n"
+            "• 软件分析 (可清理软件、旧内核、孤立包)"
         )
     
     def 恢复窗口状态(self):
