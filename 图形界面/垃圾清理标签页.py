@@ -18,6 +18,7 @@ from 核心 import 垃圾清理器, 垃圾项
 class 垃圾清理线程(QThread):
     """垃圾清理工作线程"""
     进度更新 = Signal(int)
+    扫描到文件 = Signal(object)  # 实时发射扫描到的文件
     扫描完成 = Signal(list)
     清理完成 = Signal(dict)
 
@@ -30,7 +31,8 @@ class 垃圾清理线程(QThread):
 
     def run(self):
         if self.任务类型 == '扫描':
-            垃圾文件 = self.清理器.扫描垃圾文件(self.进度更新.emit)
+            # 修改扫描方法，让它实时发射文件
+            垃圾文件 = self.清理器.扫描垃圾文件(self.进度更新.emit, self.扫描到文件.emit)
             self.扫描完成.emit(垃圾文件)
         elif self.任务类型 == '清理':
             结果 = self.清理器.清理选中的垃圾(self.垃圾列表, self.进度更新.emit)
@@ -49,7 +51,8 @@ class 垃圾清理标签页(QWidget):
     def __init__(self):
         super().__init__()
         self.清理器 = 垃圾清理器()
-        self.当前垃圾列表 = []
+        self.所有垃圾列表 = []  # 保存所有扫描到的垃圾
+        self.当前垃圾列表 = []  # 当前显示的垃圾（可能是过滤后的）
         self.工作线程 = None
         self.初始化界面()
 
@@ -241,37 +244,70 @@ class 垃圾清理标签页(QWidget):
         # 创建工作线程
         self.工作线程 = 垃圾清理线程('扫描', self.清理器)
         self.工作线程.进度更新.connect(self.进度条.setValue)
+        self.工作线程.扫描到文件.connect(self.实时添加文件)
         self.工作线程.扫描完成.connect(self.扫描完成)
         self.工作线程.start()
 
+    def 实时添加文件(self, 垃圾):
+        """实时添加扫描到的文件"""
+        self.当前垃圾列表.append(垃圾)
+
+        # 实时更新统计
+        self.统计标签.setText(f"已扫描 {len(self.当前垃圾列表)} 个垃圾文件")
+
+        # 实时添加到表格（只添加一行）
+        行号 = self.垃圾表格.rowCount()
+        self.垃圾表格.insertRow(行号)
+
+        # 选择复选框
+        复选框 = QCheckBox()
+        复选框.setChecked(垃圾.是否选中)
+        复选框.stateChanged.connect(lambda state, g=垃圾: self.垃圾项选择改变(g, state))
+        self.垃圾表格.setCellWidget(行号, 0, 复选框)
+
+        # 类型
+        类型项 = QTableWidgetItem(垃圾.类型)
+        self.垃圾表格.setItem(行号, 1, 类型项)
+
+        # 文件名
+        文件路径 = Path(垃圾.路径)
+        文件名项 = QTableWidgetItem(文件路径.name)
+        self.垃圾表格.setItem(行号, 2, 文件名项)
+
+        # 大小
+        大小项 = QTableWidgetItem(self.清理器.格式化大小(垃圾.大小))
+        大小项.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.垃圾表格.setItem(行号, 3, 大小项)
+
+        # 路径
+        路径项 = QTableWidgetItem(垃圾.路径)
+        self.垃圾表格.setItem(行号, 4, 路径项)
+
     def 扫描完成(self, 垃圾文件: List):
         """扫描完成"""
-        self.当前垃圾列表 = 垃圾文件
         self.扫描按钮.setEnabled(True)
         self.进度条.setVisible(False)
+        self.清理按钮.setEnabled(True)
 
-        if 垃圾文件:
-            self.清理按钮.setEnabled(True)
-            self.统计标签.setText(f"找到 {len(垃圾文件)} 个垃圾文件")
+        # 保存所有垃圾
+        self.所有垃圾列表 = 垃圾文件
+        self.当前垃圾列表 = 垃圾文件.copy()  # 显示所有垃圾
 
-            # 使用定时器延迟更新UI，避免阻塞
-            QTimer.singleShot(100, self.延迟更新UI)
-        else:
-            self.统计标签.setText("未找到垃圾文件")
-            QMessageBox.information(self, "提示", "系统中未找到垃圾文件！")
-
-    def 延迟更新UI(self):
-        """延迟更新UI，避免阻塞"""
+        # 更新类型树（只做一次）
         self.更新类型树()
-        self.更新垃圾表格()
 
     def 更新类型树(self):
         """更新类型树"""
+        self.类型树.clear()
+
+        if not self.所有垃圾列表:
+            return
+
         # 按类型分组
         类型分组 = {}
         总大小 = 0
 
-        for 垃圾 in self.当前垃圾列表:
+        for 垃圾 in self.所有垃圾列表:
             if 垃圾.类型 not in 类型分组:
                 类型分组[垃圾.类型] = []
             类型分组[垃圾.类型].append(垃圾)
@@ -287,71 +323,23 @@ class 垃圾清理标签页(QWidget):
             类型项.setData(0, Qt.UserRole, 类型)
             类型项.setCheckState(0, Qt.Checked)
 
-            # 添加子项
-            for 垃圾 in 垃圾列表[:10]:  # 只显示前10个作为示例
-                子项 = QTreeWidgetItem(类型项)
-                子项.setText(0, f"  {垃圾.描述[:50]}...")
-                子项.setData(0, Qt.UserRole, 垃圾)
-                子项.setCheckState(0, Qt.Checked)
-
-            if len(垃圾列表) > 10:
-                更多项 = QTreeWidgetItem(类型项)
-                更多项.setText(0, f"  ... 还有 {len(垃圾列表) - 10} 项")
-
         # 添加总统计
         总项 = QTreeWidgetItem(self.类型树)
-        总项.setText(0, f"总计: {len(self.当前垃圾列表)} 项, {self.清理器.格式化大小(总大小)}")
+        总项.setText(0, f"总计: {len(self.所有垃圾列表)} 项, {self.清理器.格式化大小(总大小)}")
         总项.setData(0, Qt.UserRole, 'TOTAL')
         总项.setCheckState(0, Qt.Checked)
 
         # 展开所有项
         self.类型树.expandAll()
 
-    def 更新垃圾表格(self):
-        """更新垃圾表格"""
-        显示列表 = self.获取显示垃圾列表()
-
-        # 如果数据太多，使用虚拟加载（只显示前200行）
-        最大显示行数 = 200
-        if len(显示列表) > 最大显示行数:
-            self.垃圾表格.setRowCount(最大显示行数)
-            # 添加提示行
-            self.垃圾表格.setRowCount(最大显示行数 + 1)
-            提示项 = QTableWidgetItem(f"... 还有 {len(显示列表) - 最大显示行数} 行未显示")
-            提示项.setTextAlignment(Qt.AlignCenter)
-            self.垃圾表格.setItem(最大显示行数, 0, 提示项)
-            self.垃圾表格.setSpan(最大显示行数, 0, 1, 5)  # 合并5列
-            显示列表 = 显示列表[:最大显示行数]
-        else:
-            self.垃圾表格.setRowCount(len(显示列表))
-
-        for 行号, 垃圾 in enumerate(显示列表):
-            # 选择复选框
-            复选框 = QCheckBox()
-            复选框.setChecked(垃圾.是否选中)
-            复选框.stateChanged.connect(lambda state, g=垃圾: self.垃圾项选择改变(g, state))
-            self.垃圾表格.setCellWidget(行号, 0, 复选框)
-
-            # 类型
-            类型项 = QTableWidgetItem(垃圾.类型)
-            类型项.setToolTip(垃圾.类型)
-            self.垃圾表格.setItem(行号, 1, 类型项)
-
-            # 文件名
-            文件路径 = Path(垃圾.路径)
-            文件名项 = QTableWidgetItem(文件路径.name)
-            文件名项.setToolTip(垃圾.描述)
-            self.垃圾表格.setItem(行号, 2, 文件名项)
-
-            # 大小
-            大小项 = QTableWidgetItem(self.清理器.格式化大小(垃圾.大小))
-            大小项.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.垃圾表格.setItem(行号, 3, 大小项)
-
-            # 路径
-            路径项 = QTableWidgetItem(垃圾.路径[:100] + '...' if len(垃圾.路径) > 100 else 垃圾.路径)
-            路径项.setToolTip(垃圾.路径)
-            self.垃圾表格.setItem(行号, 4, 路径项)
+    def 更新表格复选框状态(self):
+        """更新表格中所有复选框的状态"""
+        for 行号 in range(self.垃圾表格.rowCount()):
+            复选框 = self.垃圾表格.cellWidget(行号, 0)
+            if 复选框:
+                垃圾 = self.当前垃圾列表[行号] if 行号 < len(self.当前垃圾列表) else None
+                if 垃圾:
+                    复选框.setChecked(垃圾.是否选中)
 
     def 获取显示垃圾列表(self) -> List:
         """获取显示的垃圾列表"""
@@ -372,11 +360,13 @@ class 垃圾清理标签页(QWidget):
 
         if 类型 == 'TOTAL':
             # 显示所有垃圾
+            self.当前垃圾列表 = self.所有垃圾列表.copy()
             self.更新垃圾表格()
         else:
-            # 显示特定类型的垃圾
-            类型垃圾 = [g for g in self.当前垃圾列表 if g.类型 == 类型]
-            self.显示垃圾列表(类型垃圾)
+            # 显示特定类型的垃圾（从所有垃圾中过滤）
+            类型垃圾 = [g for g in self.所有垃圾列表 if g.类型 == 类型]
+            self.当前垃圾列表 = 类型垃圾
+            self.更新垃圾表格()
 
     def 类型树项改变(self, 项: QTreeWidgetItem, 列: int):
         """类型树项改变"""
@@ -384,25 +374,26 @@ class 垃圾清理标签页(QWidget):
         选中状态 = 项.checkState(0) == Qt.Checked
 
         if 类型 == 'TOTAL':
-            # 全选/取消全选
-            for 垃圾 in self.当前垃圾列表:
+            # 全选/取消全选（操作所有垃圾）
+            for 垃圾 in self.所有垃圾列表:
                 垃圾.是否选中 = 选中状态
         elif isinstance(类型, str):
-            # 选择/取消选择特定类型的所有垃圾
-            for 垃圾 in self.当前垃圾列表:
+            # 选择/取消选择特定类型的所有垃圾（操作所有垃圾）
+            for 垃圾 in self.所有垃圾列表:
                 if 垃圾.类型 == 类型:
                     垃圾.是否选中 = 选中状态
 
-        self.更新垃圾表格()
+        # 更新当前显示的表格
+        self.更新表格复选框状态()
         self.更新统计信息()
 
     def 更新类型树状态(self):
         """更新类型树状态"""
-        # 计算每种类型的选中数量
+        # 计算每种类型的选中数量（基于所有垃圾）
         类型统计 = {}
         总选中数 = 0
 
-        for 垃圾 in self.当前垃圾列表:
+        for 垃圾 in self.所有垃圾列表:
             if 垃圾.类型 not in 类型统计:
                 类型统计[垃圾.类型] = {'总数': 0, '选中数': 0}
             类型统计[垃圾.类型]['总数'] += 1
@@ -411,28 +402,29 @@ class 垃圾清理标签页(QWidget):
                 总选中数 += 1
 
         # 更新树项状态
-        总项 = self.类型树.topLevelItem(self.类型树.topLevelCount() - 1)  # 最后一项是总计
+        总项 = self.类型树.topLevelItem(self.类型树.topLevelItemCount() - 1)  # 最后一项是总计
         if 总项:
-            总项.setCheckState(0, Qt.Checked if 总选中数 == len(self.当前垃圾列表) else
+            总项.setCheckState(0, Qt.Checked if 总选中数 == len(self.所有垃圾列表) else
                              Qt.PartiallyChecked if 总选中数 > 0 else Qt.Unchecked)
 
     def 过滤垃圾列表(self):
         """过滤垃圾列表"""
-        self.更新垃圾表格()
+        # 实时更新不需要过滤，显示所有文件
+        pass
 
     def 全选(self):
         """全选"""
-        for 垃圾 in self.当前垃圾列表:
+        for 垃圾 in self.所有垃圾列表:
             垃圾.是否选中 = True
-        self.更新垃圾表格()
+        self.更新表格复选框状态()
         self.更新类型树状态()
         self.更新统计信息()
 
     def 取消选择(self):
         """取消选择"""
-        for 垃圾 in self.当前垃圾列表:
+        for 垃圾 in self.所有垃圾列表:
             垃圾.是否选中 = False
-        self.更新垃圾表格()
+        self.更新表格复选框状态()
         self.更新类型树状态()
         self.更新统计信息()
 
@@ -452,7 +444,7 @@ class 垃圾清理标签页(QWidget):
 
     def 开始清理(self):
         """开始清理垃圾文件"""
-        选中列表 = [g for g in self.当前垃圾列表 if g.是否选中]
+        选中列表 = [g for g in self.所有垃圾列表 if g.是否选中]
 
         if not 选中列表:
             QMessageBox.warning(self, "警告", "请先选择要清理的垃圾文件！")
@@ -541,8 +533,43 @@ class 垃圾清理标签页(QWidget):
         else:
             self.统计标签.setText("请先扫描垃圾文件")
 
+    def 更新垃圾表格(self):
+        """更新垃圾表格"""
+        # 清空表格
+        self.垃圾表格.setRowCount(0)
+
+        # 重新填充表格
+        for 行号, 垃圾 in enumerate(self.当前垃圾列表):
+            self.垃圾表格.insertRow(行号)
+
+            # 选择复选框
+            复选框 = QCheckBox()
+            复选框.setChecked(垃圾.是否选中)
+            复选框.stateChanged.connect(lambda state, g=垃圾: self.垃圾项选择改变(g, state))
+            self.垃圾表格.setCellWidget(行号, 0, 复选框)
+
+            # 类型
+            类型项 = QTableWidgetItem(垃圾.类型)
+            self.垃圾表格.setItem(行号, 1, 类型项)
+
+            # 文件名
+            from pathlib import Path
+            文件路径 = Path(垃圾.路径)
+            文件名项 = QTableWidgetItem(文件路径.name)
+            self.垃圾表格.setItem(行号, 2, 文件名项)
+
+            # 大小
+            大小项 = QTableWidgetItem(self.清理器.格式化大小(垃圾.大小))
+            大小项.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.垃圾表格.setItem(行号, 3, 大小项)
+
+            # 路径
+            路径项 = QTableWidgetItem(垃圾.路径)
+            self.垃圾表格.setItem(行号, 4, 路径项)
+
     def 显示垃圾列表(self, 垃圾列表: List):
-        """显示特定的垃圾列表"""
+        """显示特定的垃圾列表（已废弃，使用类型树点击方法）"""
+        # 这个方法现在只用于内部调用，不直接使用
         self.当前垃圾列表 = 垃圾列表
         self.更新垃圾表格()
         self.更新统计信息()

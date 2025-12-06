@@ -136,7 +136,7 @@ class 垃圾清理器:
 
         return f"{大小字节:.2f} {单位[i]}"
 
-    def 扫描垃圾文件(self, 进度回调=None) -> List[垃圾项]:
+    def 扫描垃圾文件(self, 进度回调=None, 文件回调=None) -> List[垃圾项]:
         """扫描垃圾文件"""
         self.扫描结果 = []
         self.扫描状态 = True
@@ -149,7 +149,6 @@ class 垃圾清理器:
 
         位置模式总数 = len(位置模式列表)
         当前模式进度 = 0
-        开始时间 = time.time()
 
         # 第一阶段：扫描位置模式
         for 类型, 位置模式 in 位置模式列表:
@@ -194,21 +193,25 @@ class 垃圾清理器:
                 else:
                     匹配文件 = [展开路径] if 展开路径.exists() else []
 
-                # 先收集文件，稍后计算大小
+                # 扫描文件并实时处理
                 for 文件路径 in 匹配文件:
                     if not self.扫描状态:
                         return self.扫描结果
 
                     try:
                         if 文件路径.exists() and not self.是否关键文件(文件路径):
-                            # 暂时只记录路径，稍后计算大小
-                            垃圾 = 垃圾项(
-                                类型=类型,
-                                路径=str(文件路径),
-                                大小=0,  # 稍后计算
-                                描述=self.生成描述(类型, 文件路径)
-                            )
-                            self.扫描结果.append(垃圾)
+                            大小 = self.计算文件大小(文件路径)
+                            if 大小 > 0:
+                                垃圾 = 垃圾项(
+                                    类型=类型,
+                                    路径=str(文件路径),
+                                    大小=大小,
+                                    描述=self.生成描述(类型, 文件路径)
+                                )
+                                self.扫描结果.append(垃圾)
+                                # 实时回调
+                                if 文件回调:
+                                    文件回调(垃圾)
                     except (PermissionError, OSError):
                         continue
 
@@ -226,26 +229,9 @@ class 垃圾清理器:
 
         self.扫描结果 = 去重结果
 
-        # 第二阶段：计算文件大小（50-100%）
-        文件总数 = len(self.扫描结果)
-        for 索引, 垃圾 in enumerate(self.扫描结果):
-            if not self.扫描状态:
-                return self.扫描结果
-
-            # 计算文件大小
-            try:
-                文件路径 = Path(垃圾.路径)
-                if 文件路径.exists():
-                    垃圾.大小 = self.计算文件大小(文件路径)
-                else:
-                    垃圾.大小 = 0
-            except (PermissionError, OSError):
-                垃圾.大小 = 0
-
-            # 更新进度（50-100%）
-            if 进度回调 and 文件总数 > 0:
-                进度值 = 50 + int((索引 + 1) * 50 / 文件总数)
-                进度回调(min(进度值, 100))
+        # 扫描完成，进度到100%
+        if 进度回调:
+            进度回调(100)
 
         return self.扫描结果
 
