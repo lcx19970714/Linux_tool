@@ -14,6 +14,7 @@ from 核心.软件清理 import 软件清理
 from 配置 import 配置
 from .标签页 import 软件标签页
 from .进程标签页 import 进程标签页
+from .垃圾清理标签页 import 垃圾清理标签页
 from .工作线程 import 工作线程, 任务类型
 
 
@@ -108,6 +109,10 @@ class 主窗口(QMainWindow):
         self.进程标签页.优先级请求.connect(self.调整进程优先级)
         self.进程标签页.系统资源请求.connect(self.获取系统资源)
         self.标签页.addTab(self.进程标签页, "⚙️ 进程管理")
+
+        # 垃圾清理标签页
+        self.垃圾清理标签页 = 垃圾清理标签页()
+        self.标签页.addTab(self.垃圾清理标签页, "🧹 垃圾清理")
     
     def showEvent(self, 事件):
         """窗口显示事件"""
